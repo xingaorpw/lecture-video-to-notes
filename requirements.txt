@@ -1,0 +1,9 @@
+faster-whisper>=1.1.0
+# faster-whisper 1.2.x calls av.open(metadata_errors=...); PyAV 19 removed that kwarg.
+av>=11,<19
+python-docx>=1.1.0
+python-pptx>=1.0.2
+Pillow>=10.0.0
+matplotlib>=3.8.0
+zhconv>=1.4.0
+pypandoc-binary>=1.17
