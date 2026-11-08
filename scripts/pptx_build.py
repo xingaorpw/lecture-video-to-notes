@@ -371,6 +371,25 @@ def add_two_col_slide(prs, data: dict[str, Any], page: int, meta: dict[str, Any]
     return slide
 
 
+def sanitize_formula(latex: str) -> str:
+    """Normalize LaTeX aliases that matplotlib mathtext cannot parse."""
+    cleaned = latex.strip()
+    cleaned = re.sub(r"^\$\$?", "", cleaned)
+    cleaned = re.sub(r"\$\$?$", "", cleaned)
+    # Matplotlib mathtext has a smaller command set than LaTeX.
+    cleaned = cleaned.replace(r"\iint", r"\int\int")
+    cleaned = cleaned.replace(r"\iiint", r"\int\int\int")
+    cleaned = re.sub(r"\\inf(?![A-Za-z])", r"\\mathrm{inf}", cleaned)
+    # mathtext accepts \geq/\leq but not the LaTeX aliases \ge/\le.
+    cleaned = re.sub(r"\\ge(?![A-Za-z])", r"\\geq", cleaned)
+    cleaned = re.sub(r"\\le(?![A-Za-z])", r"\\leq", cleaned)
+    cleaned = cleaned.replace(r"\dfrac", r"\frac")
+    cleaned = cleaned.replace(r"\tfrac", r"\frac")
+    cleaned = cleaned.replace(r"\mathbb{R}", r"\mathbf{R}")
+    cleaned = cleaned.replace(r"\mathbb R", r"\mathbf R")
+    return cleaned
+
+
 def render_formula_png(latex: str, out_path: Path) -> bool:
     try:
         import matplotlib
@@ -379,14 +398,7 @@ def render_formula_png(latex: str, out_path: Path) -> bool:
         import matplotlib.pyplot as plt
     except Exception:
         return False
-    cleaned = latex.strip()
-    cleaned = re.sub(r"^\$\$?", "", cleaned)
-    cleaned = re.sub(r"\$\$?$", "", cleaned)
-    # Matplotlib mathtext has a smaller command set than LaTeX.
-    cleaned = cleaned.replace(r"\iint", r"\int\int")
-    cleaned = cleaned.replace(r"\iiint", r"\int\int\int")
-    cleaned = re.sub(r"\\inf(?![A-Za-z])", r"\\mathrm{inf}", cleaned)
-    cleaned = cleaned.replace(r"\mathbb{R}", r"\mathbf{R}")
+    cleaned = sanitize_formula(latex)
     cleaned = cleaned.replace(r"\mathbb R", r"\mathbf R")
     try:
         fig = plt.figure(figsize=(10, 2.6))

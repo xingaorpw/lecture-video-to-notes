@@ -109,6 +109,26 @@ $SKILL = "$PWD"
 
 macOS/Linux 用 `scripts/run.sh` 或 `.venv/bin/python scripts/lecture.py ...`。
 
+## 坏音轨 / 视觉讲义模式
+
+课堂录播常见“视频完整、音轨只有 1–2 秒”或“完全没音轨”。先预检，别直接跑 ASR：
+
+```powershell
+& "$SKILL\scripts\run.cmd" doctor
+python scripts\probe.py "D:\录播\第03讲.mp4"
+# 输出 FATAL 时：
+& "$SKILL\scripts\run.cmd" slides --workdir "D:\学习\第03讲" --interval 60
+# 读 slides/ 里的 PPT 帧写讲义，再：
+& "$SKILL\scripts\run.cmd" validate-notes --workdir "D:\学习\第03讲" --min-chapters 5
+```
+
+规则：
+
+- 课堂 PPT 可读时以 PPT 章节/例题为主；
+- 没有 PPT 才用 MOOC/教材补充，且必须标注“不是课堂逐字稿”；
+- 不伪造时间戳，不把外部资料说成老师原话；
+- 详细流程见 [references/broken-media-and-visual.md](references/broken-media-and-visual.md)。
+
 ## 产物
 
 ```text
@@ -139,6 +159,8 @@ macOS/Linux 用 `scripts/run.sh` 或 `.venv/bin/python scripts/lecture.py ...`�
 ## 已知限制
 
 - **音频缺失无法凭空补**：如果录播音轨静音，讲义只能按画面/教材补录，并会标 `[画面补录]`；不能假装是老师原话。
+- **视频完整不等于音轨完整**：真实平台出现过 2 小时视频只有 1–2 秒音频、甚至无音频流；`probe.py` 会先判 FATAL，避免白跑 ASR。
+- **PPT 可能不可读**：录播画面可能“无信号”/冻结；视觉模式只能整理可读帧，不能还原老师讲解。
 - **ASR 仍会错术语**：`small` 是质量/速度平衡点；术语多的课建议 `medium`，并加 `--glossary`。
 - **PDF 导出**：DOCX/PPTX 已可直接用 Word/PowerPoint 打开；项目不内置 LibreOffice，PDF 导出需自行安装。
 - **Tongji 平台下载器不在仓库内**：课程平台需要登录态，属于用户环境特定逻辑；仓库只负责“已有视频/音频 → 学习资料”。
@@ -154,7 +176,7 @@ python scripts/lecture.py --help
 python scripts/doctor.py --json
 ```
 
-测试覆盖：时间戳/中文规范化、分块覆盖率、讲义组装、PPTX 生成、SKILL 契约与模板 JSON。
+测试覆盖：时间戳/中文规范化、分块覆盖率、讲义组装、PPTX 生成、媒体预检/短音轨、`--no-ppt`、公式别名、SKILL 契约与模板 JSON。
 
 ## 目录
 

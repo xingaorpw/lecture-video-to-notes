@@ -21,6 +21,9 @@ def test_skill_frontmatter_and_files():
         "templates/note-template.md",
         "templates/slides.example.json",
         "scripts/lecture.py",
+        "scripts/probe.py",
+        "scripts/slides.py",
+        "scripts/validate_notes.py",
         "scripts/setup.ps1",
         "scripts/run.cmd",
     ]

@@ -18,6 +18,11 @@ description: 大学课堂录播/网课/讲座视频转完整学习资料：提�
 
 缺任何一项，都不算交付完成。
 
+**两种明确例外**（必须写进交付说明）：
+
+- 用户只要讲义：用 `validate --no-ppt`，PPTX 不算缺失；
+- 录像无可用音轨：逐字稿不可得，改走视觉/外部资料模式，用 `validate-notes`，并在 `04_课堂信息.md` 标注来源与限制。不能把“没做”包装成“完整”。
+
 ## 路径与解释器
 
 先解析本文件所在目录为 `SKILL_DIR`（不要猜、不要全盘搜索）。Windows 下：
@@ -80,6 +85,23 @@ powershell -ExecutionPolicy Bypass -File "$SKILL\scripts\setup.ps1" -WithFfmpeg
   logs/
 ```
 
+## 第 2 步前：媒体预检（必须做）
+
+真实录播经常“视频完整、音轨坏掉”：2 小时视频只有 1–2 秒音频、完全没有音频流、或前段静音。**不要直接跑 ASR**，先预检：
+
+```powershell
+& $PY "$SKILL\scripts\probe.py" "D:\学习\线性代数\第03讲\source.mp4"
+```
+
+输出 `FATAL` 时停止转写，按 [references/broken-media-and-visual.md](references/broken-media-and-visual.md) 处理：
+
+1. 抽帧看 PPT/板书是否可读：`python scripts/slides.py --workdir ... --interval 60`
+2. 有可读 PPT：做视觉讲义，课堂 PPT 为主；
+3. 无 PPT：用 MOOC/教材/课件补充，但必须标注“不是课堂逐字稿”；
+4. 都没有：明确告知不可做，禁止伪造。
+
+判断标准：`audio_duration < 10 s`、无音频流、`audio_duration < video_duration * 0.5` 都视为致命。
+
 ## 第 2 步：提取音频并转写
 
 ```powershell
@@ -99,6 +121,7 @@ powershell -ExecutionPolicy Bypass -File "$SKILL\scripts\setup.ps1" -WithFfmpeg
 | 机器慢/视频长 | `--beam-size 1`，先出稿，再用 `medium` 只重跑低置信段落 |
 | 中英混杂 | `--language auto`，并在 `course.json` 里记录实际语言 |
 | 中文输出繁体 | 默认用 `zhconv` 转简体；要保留原样加 `--no-simplify` |
+| VAD 把语音全过滤 | 重试 `--no-vad`；仍无结果先查音轨是否只有 1–2 秒 |
 
 产物：
 
@@ -228,6 +251,8 @@ powershell -ExecutionPolicy Bypass -File "$SKILL\scripts\setup.ps1" -WithFfmpeg
 
 ```powershell
 & $RUN validate --workdir "D:\学习\线性代数\第03讲"
+# 只要讲义、不做 PPT：
+& $RUN validate --workdir "D:\学习\线性代数\第03讲" --no-ppt
 ```
 
 校验器输出 `output/校验报告.md`，并给出 PASS/FAIL。硬性门：
@@ -255,6 +280,33 @@ powershell -ExecutionPolicy Bypass -File "$SKILL\scripts\setup.ps1" -WithFfmpeg
 
 同时报告：视频时长、转写模型、分块数、章节数、讲义字数、PPT 页数、已知问题（ASR 存疑/公式降级/未截取画面）。
 
+## 无音轨/视觉讲义模式
+
+如果 `probe.py` 判定音轨不可用，不要跑 `transcribe`。按下面流程：
+
+```powershell
+# 1. 抽帧（先 60s 粗看，再对有效段 15-30s 细抽）
+& $RUN slides --workdir "D:\学习\第03讲" --interval 60
+
+# 2. 读 slides/ 里的 PPT 帧，按课堂 PPT 章节写 notes/chapters
+#    没有 PPT 的部分用 MOOC/教材补充，并在 04_课堂信息.md 标注来源
+
+# 3. 组装 + DOCX
+& $RUN assemble --workdir "D:\学习\第03讲"
+& $RUN docx --workdir "D:\学习\第03讲"
+
+# 4. 专用校验（不要求逐字稿/分块）
+& $RUN validate-notes --workdir "D:\学习\第03讲" --min-chapters 5
+```
+
+视觉讲义硬规则：
+
+- 课堂 PPT 可读时，**以 PPT 的章节/例题为主**；
+- 外部资料只能补缺失部分，必须写明“不是课堂逐字稿”；
+- 不用假时间戳；不要假装有逐字稿；
+- 每讲建议 ≥ 8,000 字、≥ 20 题（推荐 30 题），每题给思路/代码/结果/易错点；
+- 细节见 `references/broken-media-and-visual.md`。
+
 ## 失败处理速查
 
 | 现象 | 处理 |
@@ -266,6 +318,10 @@ powershell -ExecutionPolicy Bypass -File "$SKILL\scripts\setup.ps1" -WithFfmpeg
 | 讲义越写越像摘要 | 回到 chunk，按“定义→条件→推导→例子→易错点”逐段补，不许用“总之”跳过 |
 | PPT 文字溢出 | 拆页；每页 ≤ 6 条；把长句改成“结论 + 3 个支撑点” |
 | 公式变乱码 | 确认 Pandoc 可用；PPT 公式用 `formula` 字段；降级时保留 LaTeX 原文 |
+| `No speech segments` | 先跑 `probe.py`；音轨只有 1–2 秒/无音轨就是坏了，不要反复调 ASR；可试 `--no-vad` |
+| 视频完整但只有 1–2 秒音频 | 音轨损坏；走视觉/外部资料模式，别浪费几十分钟转写静音 |
+| 画面“无信号”/冻结 | 抽帧也没用；用 MOOC/教材补充并标注，或明确告知不可做 |
+| 没有课堂 PPT 但有 MOOC | 用 MOOC 章节结构补细节，讲义必须标注“不是课堂逐字稿” |
 | 校验 FAIL | 先看报告里的 `FAIL` 行，按“覆盖→内容→引用→格式”的顺序修 |
 
 ## 参考
@@ -275,5 +331,6 @@ powershell -ExecutionPolicy Bypass -File "$SKILL\scripts\setup.ps1" -WithFfmpeg
 - `references/ppt-spec.md`：`slides.json` 完整字段、版式、设计系统。
 - `references/asr-playbook.md`：模型选择、术语提示、低置信处理、长视频策略。
 - `references/troubleshooting.md`：常见错误与修复。
+- `references/broken-media-and-visual.md`：坏音轨/冻结画面/视觉讲义/外部资料补充的完整流程与红线。
 - `templates/note-template.md`：分章模板。
 - `templates/slides.example.json`：可直接改的课件输入示例。

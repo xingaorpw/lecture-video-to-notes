@@ -81,7 +81,7 @@ def slide_text(slide) -> str:
     return "\n".join(parts)
 
 
-def validate(workdir: Path, *, min_chars: int | None = None, min_slides: int | None = None, min_chapters: int | None = None, min_questions: int = 20) -> dict[str, Any]:
+def validate(workdir: Path, *, min_chars: int | None = None, min_slides: int | None = None, min_chapters: int | None = None, min_questions: int = 20, require_pptx: bool = True) -> dict[str, Any]:
     checks: list[Check] = []
     course = load_course(workdir)
     duration = float(course.get("duration_sec") or 0)
@@ -190,7 +190,9 @@ def validate(workdir: Path, *, min_chars: int | None = None, min_slides: int | N
 
     # PPTX
     pptx_path = workdir / "output" / "课件.pptx"
-    if pptx_path.exists():
+    if not require_pptx:
+        add(checks, "PPTX", True, "跳过（--no-ppt，只交付讲义）")
+    elif pptx_path.exists():
         try:
             from pptx import Presentation
 

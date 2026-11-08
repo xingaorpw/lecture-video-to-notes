@@ -66,8 +66,9 @@ $env:HF_ENDPOINT = "https://hf-mirror.com"
 
 - 确认 `--language zh`，不要 `auto`。
 - 降低 `--beam-size` 到 1 先看是否改善。
-- 检查音频是否只有单声道/极低音量：`ffprobe` 看声道和音量。
-- 用 `--vad-filter`（默认开）过滤静音。
+- 检查音频是否只有单声道/极低音量：先跑 `python scripts/probe.py 视频.mp4`。
+- 如果 VAD 把语音全过滤，重试 `--no-vad`；仍无结果先看音轨时长。
+- 音轨只有 1–2 秒/无音轨 = 录像坏了，不是 ASR 参数问题；转视觉模式，见 `references/broken-media-and-visual.md`。
 
 ### 术语全错
 
@@ -82,15 +83,21 @@ $env:HF_ENDPOINT = "https://hf-mirror.com"
 - 有 GPU 时 `--device cuda --compute-type float16`。
 - 先跑 `tiny` 出时间轴，再用 `small` 重跑关键章节。
 
-### 视频没有音轨
+### 视频没有音轨 / 音轨只有 1–2 秒
 
-`ffprobe` 检查：
+先跑：
 
 ```powershell
-ffprobe -v error -select_streams a -show_entries stream=index,codec_name -of json "视频.mp4"
+python scripts/probe.py "视频.mp4"
 ```
 
-没有 `streams` 就是无音轨，需要用户提供录音或带音轨的版本。
+它会分别输出 `audio_duration` 和 `video_duration`。以下都是致命：
+
+- `has_audio=false`：没有音频流；
+- `audio_duration < 10 s`：只录到开头/坏轨；
+- `audio_duration < video_duration * 0.5`：音轨明显不完整。
+
+不要反复换模型/VAD：这是素材问题。按 `references/broken-media-and-visual.md` 抽 PPT 帧、用 MOOC/教材补充，或明确告知无法做。
 
 ## 3. 分块与讲义
 

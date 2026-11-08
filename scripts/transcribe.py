@@ -18,6 +18,7 @@ from common import (
     load_course,
     normalize_text,
     now_iso,
+    preflight_media,
     probe_duration,
     read_json,
     run,
@@ -139,6 +140,7 @@ def transcribe_audio(
     initial_prompt: str | None,
     offset: float = 0.0,
     simplify: bool = True,
+    no_vad: bool = False,
 ) -> dict[str, Any]:
     try:
         from faster_whisper import WhisperModel
@@ -165,8 +167,8 @@ def transcribe_audio(
         str(audio),
         language=None if language in (None, "", "auto") else language,
         beam_size=beam_size,
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 500},
+        vad_filter=not no_vad,
+        vad_parameters=None if no_vad else {"min_silence_duration_ms": 500},
         condition_on_previous_text=False,
         initial_prompt=initial_prompt,
         word_timestamps=False,
@@ -258,11 +260,25 @@ def transcribe(
     start: float | None = None,
     end: float | None = None,
     simplify: bool = True,
+    no_vad: bool = False,
 ) -> dict[str, Any]:
     course = load_course(workdir)
     source = Path(course["source_video"])
     if not source.exists():
         raise FileNotFoundError(f"Source video not found: {source}")
+
+    # Fail fast on broken audio tracks instead of spending a long time extracting
+    # silence and getting a generic "No speech segments" error.
+    if start is None and end is None:
+        check = preflight_media(source)
+        for warning in check.get("warnings", []):
+            print(f"[transcribe] WARN {warning}", file=sys.stderr, flush=True)
+        if not check.get("ok"):
+            raise RuntimeError(
+                "媒体预检失败："
+                + "；".join(check.get("fatal") or check.get("warnings") or ["音轨不可用"])
+                + "。可改用 PPT/画面视觉模式（python scripts/slides.py ...）"
+            )
 
     device = detect_device(device)
     compute_type = compute_type or default_compute_type(device)
@@ -284,10 +300,15 @@ def transcribe(
         initial_prompt=prompt,
         offset=float(start or 0),
         simplify=simplify,
+        no_vad=no_vad,
     )
     segments = result["segments"]
     if not segments:
-        raise RuntimeError("No speech segments were recognized; check the audio track/language")
+        hint = (
+            "No speech segments were recognized. 先看音轨是否只有 1-2 秒/无音轨；"
+            "可重试 --no-vad，或改用 slides.py 的视觉讲义流程。"
+        )
+        raise RuntimeError(hint)
 
     if start is None and end is None:
         full_duration = float(duration or result["info"]["duration"] or course.get("duration_sec") or 0)
@@ -342,6 +363,7 @@ def main() -> int:
     parser.add_argument("--start", type=float, default=None, help="start second")
     parser.add_argument("--end", type=float, default=None, help="end second")
     parser.add_argument("--no-simplify", action="store_false", dest="simplify", help="keep traditional Chinese as-is")
+    parser.add_argument("--no-vad", action="store_true", help="disable VAD; use when VAD drops all speech")
     args = parser.parse_args()
     result = transcribe(
         Path(args.workdir).resolve(),
@@ -354,6 +376,7 @@ def main() -> int:
         start=args.start,
         end=args.end,
         simplify=args.simplify,
+        no_vad=args.no_vad,
     )
     print(f"OK segments={result['segments']} duration={format_ts(result['duration'])}")
     return 0

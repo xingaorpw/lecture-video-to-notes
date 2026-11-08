@@ -197,6 +197,110 @@ def probe_duration(path: Path) -> float:
     return 0.0
 
 
+def probe_media(path: Path) -> dict[str, Any]:
+    """Return stream metadata without trusting the container header alone.
+
+    Real lecture recordings sometimes have a full video track and only a 1-2 s
+    audio track (or no audio track at all).  Callers should check
+    ``audio_duration`` before spending time on ASR.
+    """
+    info: dict[str, Any] = {
+        "duration": 0.0,
+        "video_duration": 0.0,
+        "audio_duration": 0.0,
+        "has_audio": False,
+        "has_video": False,
+        "audio_codec": "",
+        "video_codec": "",
+    }
+    try:
+        import av
+
+        with av.open(str(path)) as container:
+            if container.duration:
+                info["duration"] = float(container.duration / av.time_base)
+            for stream in container.streams:
+                duration = float(stream.duration * stream.time_base) if stream.duration else 0.0
+                if stream.type == "audio":
+                    info["has_audio"] = True
+                    info["audio_duration"] = max(info["audio_duration"], duration)
+                    info["audio_codec"] = stream.codec_context.name
+                elif stream.type == "video":
+                    info["has_video"] = True
+                    info["video_duration"] = max(info["video_duration"], duration)
+                    info["video_codec"] = stream.codec_context.name
+    except Exception as exc:
+        info["error"] = f"{type(exc).__name__}: {exc}"
+    return info
+
+
+def audio_levels(path: Path, max_seconds: float = 30.0) -> dict[str, float]:
+    """Measure RMS/peak of the first ``max_seconds`` of audio (dBFS)."""
+    try:
+        import av
+        import numpy as np
+
+        with av.open(str(path)) as container:
+            stream = next((s for s in container.streams if s.type == "audio"), None)
+            if stream is None:
+                return {"rms_db": -120.0, "peak": 0.0, "samples": 0.0}
+            chunks: list[Any] = []
+            started = None
+            for frame in container.decode(stream):
+                if frame.pts is None:
+                    continue
+                t = float(frame.pts * stream.time_base)
+                if started is None:
+                    started = t
+                if t - started > max_seconds:
+                    break
+                chunks.append(frame.to_ndarray().astype("float32").reshape(-1))
+            if not chunks:
+                return {"rms_db": -120.0, "peak": 0.0, "samples": 0.0}
+            data = np.concatenate(chunks)
+            rms = float(np.sqrt(np.mean(data**2))) if data.size else 0.0
+            peak = float(np.max(np.abs(data))) if data.size else 0.0
+            db = 20.0 * float(np.log10(max(rms, 1e-9)))
+            return {"rms_db": db, "peak": peak, "samples": float(data.size)}
+    except Exception:
+        return {"rms_db": -120.0, "peak": 0.0, "samples": 0.0}
+
+
+def preflight_media(
+    path: Path,
+    *,
+    min_audio_seconds: float = 10.0,
+    min_audio_ratio: float = 0.5,
+    silence_db: float = -55.0,
+) -> dict[str, Any]:
+    """Check whether a recording is usable for ASR before transcribing it."""
+    info = probe_media(path)
+    warnings: list[str] = []
+    fatal: list[str] = []
+    if not info.get("has_audio"):
+        fatal.append("没有音频流：无法转写，只能改用 PPT/画面视觉讲义")
+    else:
+        audio_duration = float(info.get("audio_duration") or 0.0)
+        video_duration = float(info.get("video_duration") or info.get("duration") or 0.0)
+        if audio_duration and audio_duration < min_audio_seconds:
+            fatal.append(
+                f"音轨只有 {audio_duration:.2f} s（视频 {video_duration:.0f} s）：音轨损坏，ASR 不可用"
+            )
+        elif video_duration and audio_duration and audio_duration < video_duration * min_audio_ratio:
+            fatal.append(
+                f"音轨 {audio_duration:.0f} s 明显短于视频 {video_duration:.0f} s：可能只录到开头"
+            )
+        levels = audio_levels(path)
+        if levels["rms_db"] < silence_db:
+            warnings.append(
+                f"音频前段接近无声（RMS {levels['rms_db']:.1f} dBFS）：可能是静音/麦克风未开"
+            )
+    info["warnings"] = fatal + warnings
+    info["fatal"] = fatal
+    info["ok"] = not fatal
+    return info
+
+
 def format_ts(seconds: float, *, force_hours: bool = True) -> str:
     seconds = max(0.0, float(seconds))
     total = int(round(seconds))

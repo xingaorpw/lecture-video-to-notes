@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -77,9 +78,42 @@ def cmd_transcribe(args) -> int:
         start=args.start,
         end=args.end,
         simplify=getattr(args, "simplify", True),
+        no_vad=getattr(args, "no_vad", False),
     )
     print(f"OK segments={result['segments']} duration={result['duration']:.1f}s")
     return 0
+
+
+def _run_tool(script: str, argv: list[str]) -> int:
+    path = Path(__file__).resolve().parent / script
+    return subprocess.run([sys.executable, str(path), *argv]).returncode
+
+
+def cmd_slides(args) -> int:
+    argv = ["--workdir", args.workdir, "--interval", str(args.interval)]
+    if args.start:
+        argv += ["--start", str(args.start)]
+    if args.end:
+        argv += ["--end", str(args.end)]
+    if args.delete_video:
+        argv.append("--delete-video")
+    return _run_tool("slides.py", argv)
+
+
+def cmd_validate_notes(args) -> int:
+    return _run_tool(
+        "validate_notes.py",
+        [
+            "--workdir",
+            args.workdir,
+            "--min-chapters",
+            str(args.min_chapters),
+            "--min-chars",
+            str(args.min_chars),
+            "--min-questions",
+            str(args.min_questions),
+        ],
+    )
 
 
 def cmd_chunk(args) -> int:
@@ -124,6 +158,7 @@ def cmd_validate(args) -> int:
         min_slides=args.min_slides,
         min_chapters=args.min_chapters,
         min_questions=args.min_questions,
+        require_pptx=getattr(args, "require_pptx", True),
     )
     return 0 if result["ok"] else 1
 
@@ -190,6 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--start", type=float, default=None)
     p.add_argument("--end", type=float, default=None)
     p.add_argument("--no-simplify", action="store_false", dest="simplify", help="keep traditional Chinese as-is")
+    p.add_argument("--no-vad", action="store_true", help="disable VAD; use when VAD drops all speech")
     p.set_defaults(func=cmd_transcribe)
 
     p = sub.add_parser("chunk", help="split transcript into study chunks")
@@ -220,7 +256,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-slides", type=int, default=None)
     p.add_argument("--min-chapters", type=int, default=None)
     p.add_argument("--min-questions", type=int, default=20)
+    p.add_argument("--no-ppt", action="store_false", dest="require_pptx", help="only deliver notes/DOCX, skip PPTX checks")
     p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("slides", help="extract PPT/board frames when audio is unusable")
+    p.add_argument("--workdir", required=True)
+    p.add_argument("--interval", type=float, default=60.0)
+    p.add_argument("--start", type=float, default=0.0)
+    p.add_argument("--end", type=float, default=None)
+    p.add_argument("--delete-video", action="store_true")
+    p.set_defaults(func=cmd_slides)
+
+    p = sub.add_parser("validate-notes", help="validate notes-only / visual deliverables")
+    p.add_argument("--workdir", required=True)
+    p.add_argument("--min-chapters", type=int, default=5)
+    p.add_argument("--min-chars", type=int, default=8000)
+    p.add_argument("--min-questions", type=int, default=20)
+    p.set_defaults(func=cmd_validate_notes)
 
     p = sub.add_parser("all", help="init + transcribe + chunk")
     p.add_argument("--video", required=True)

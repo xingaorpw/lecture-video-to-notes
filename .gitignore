@@ -8,6 +8,10 @@ env/
 .ruff_cache/
 runs/
 output/
+slides/
+transcript/
+notes/
+preview*/
 models/
 tools/
 *.log
